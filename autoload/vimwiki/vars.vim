@@ -40,7 +40,7 @@ function! s:populate_global_variables() abort
   let g:vimwiki_global_vars.schemes = join(['wiki\d\+', 'diary', 'local'], '\|')
   let g:vimwiki_global_vars.web_schemes1 = join(['http', 'https', 'file', 'ftp', 'gopher',
         \ 'telnet', 'nntp', 'ldap', 'rsync', 'imap', 'pop', 'irc', 'ircs', 'cvs', 'svn', 'svn+ssh',
-        \ 'git', 'ssh', 'fish', 'sftp'], '\|')
+        \ 'git', 'ssh', 'fish', 'sftp', 'zotero'], '\|')
   let web_schemes2 =
         \ join(['mailto', 'news', 'xmpp', 'sip', 'sips', 'doi', 'urn', 'tel', 'data'], '\|')
 
