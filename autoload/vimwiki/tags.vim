@@ -314,19 +314,138 @@ function! vimwiki#tags#get_tags() abort
   return keys(tags)
 endfunction
 
+function! s:zt_generaotrTags(state)
+  " Generate tag list where no file is repated under a given tag. Also use caption of 
+  " file as link description. The files are sorted by the number of tags in the file 
+  " This is a drop in replacement for the default tag generator.
+  function a:state.f() abort
+    let need_all_tags = empty(self.specific_tags)
+    let metadata = s:load_tags_metadata()
+    
+    " make a dictionary { tag_name: [tag_links, ...] }
+    let wiki_nr = vimwiki#vars#get_bufferlocal('wiki_nr') 
+    let path = vimwiki#vars#get_wikilocal('path', wiki_nr)
+    let ext = vimwiki#vars#get_wikilocal('ext', wiki_nr)
+    let tags_entries = {}
+    for key in keys(metadata)  "files...
+      let entries = metadata[key]
+      let caption = vimwiki#base#read_caption(path .  key . ext)
+      for entry in entries "tag in file
+        if has_key(tags_entries, entry.tagname)
+          let files_dict = tags_entries[entry.tagname]
+          if has_key(files_dict, key)
+            let files_dict[key].count +=1
+          else
+            let file =  {
+                  \ 'count': 1,
+                  \ 'caption': caption,
+                  \ 'link': entry.link,  
+                  \}
+            let files_dict[key]=file
+          endif
+        else
+          " tag not presenet dict for current file and an empty files dict
+          let file =  {
+                \ 'count': 1,
+                \ 'caption': caption,
+                \ 'link': entry.link, 
+                \}
+          let files_dict = {}
+          let files_dict[key] = file
+          let tags_entries[entry.tagname] = files_dict
+        endif
+      endfor
+      unlet entry " needed for older vims with sticky type checking since name is reused
+    endfor
+    
+    function! Sort_by_count(argLeft, argRight)
+      if a:argLeft.count < a:argRight.count
+        return -1
+      elseif a:argLeft.count == a:argRight.count
+        if a:argLeft.caption < a:argRight.caption
+          return -1
+        elseif a:argLeft.caption ==# a:argRight.caption
+          return 0
+        else
+          return 1
+        endif 
+      else
+        return 1
+      endif
+    endfunction
 
-function! vimwiki#tags#generate_tags(create, ...) abort
-  " Generate tags in current buffer
-  " Similar to vimwiki#base#generate_links.  In the current buffer, appends
-  " tags and references to all their instances.  If no arguments (tags) are
-  " specified, outputs all tags.
-  let specific_tags = a:000
-  let header_level = vimwiki#vars#get_global('tags_header_level')
+    let lines = []
+    let bullet = repeat(' ', vimwiki#lst#get_list_margin()).vimwiki#lst#default_symbol().' '
+    for tagname in sort(keys(tags_entries))
+      if need_all_tags || index(self.specific_tags, tagname) != -1
+        " header
+        if len(lines) > 0
+          call add(lines, '')
+        endif
 
-  " use a dictionary function for closure like capability
-  " copy all local variables into dict (add a: if arguments are needed)
-  let GeneratorTags = copy(l:)
-  function! GeneratorTags.f() abort
+        let tag_tpl = printf('rxH%d_Template', self.header_level + 1)
+        call add(lines, s:safesubstitute(vimwiki#vars#get_syntaxlocal(tag_tpl), '__Header__', tagname, ''))
+        
+        if vimwiki#vars#get_wikilocal('syntax') ==# 'markdown'
+          for _ in range(vimwiki#vars#get_global('markdown_header_style'))
+            call add(lines, '')
+          endfor
+        endif
+
+        " list of files dict containing {link, count, caption, key}
+        let file_list = []
+        let file_dict = tags_entries[tagname]
+        for k_ in keys(file_dict)
+          let f_ = file_dict[k_]
+          let f_.key = k_
+          if f_.count > 1 && f_.caption !=? ''
+            let f_.caption = f_.caption . " ;" . f_.count
+          endif
+          call add(file_list, f_)
+        endfor
+        unlet f_
+        let file_list = sort(file_list, function('Sort_by_count'))
+        for f_ in file_list
+          if vimwiki#vars#get_wikilocal('syntax') ==# 'markdown'
+            let link_tpl = vimwiki#vars#get_syntaxlocal('Weblink3Template')
+            let link_infos = vimwiki#base#resolve_link(f_.link)
+            if empty(link_infos.anchor)
+              let link_tpl = vimwiki#vars#get_syntaxlocal('Link1')
+              let entry = s:safesubstitute(link_tpl, '__LinkUrl__', f_.link, '')
+              let entry = s:safesubstitute(entry, '__LinkDescription__', f_.description, '')
+              let file_extension = vimwiki#vars#get_wikilocal('ext', vimwiki#vars#get_bufferlocal('wiki_nr'))
+              let entry = s:safesubstitute(entry, '__FileExtension__', file_extension , '')
+            else
+              let link_text = split(f_.link, '#', 1)[0]
+              let entry = s:safesubstitute(link_tpl, '__LinkUrl__', link_text, '')
+              let entry = s:safesubstitute(entry, '__LinkAnchor__', link_infos.anchor, '')
+              let entry = s:safesubstitute(entry, '__LinkDescription__', f_.caption, '')
+              let file_extension = vimwiki#vars#get_wikilocal('ext', vimwiki#vars#get_bufferlocal('wiki_nr'))
+              let entry = s:safesubstitute(entry, '__FileExtension__', file_extension , '')
+            endif
+          else
+            if f_.caption ==? ''
+              let link_tpl = vimwiki#vars#get_syntaxlocal('Link1')
+            else
+              let link_tpl = vimwiki#vars#get_syntaxlocal('Link2')
+            endif
+            let entry = s:safesubstitute(link_tpl, '__LinkUrl__', f_.link, '')
+            let entry = s:safesubstitute(entry, '__LinkDescription__', f_.caption, '')
+            let file_extension = vimwiki#vars#get_wikilocal('ext', vimwiki#vars#get_bufferlocal('wiki_nr'))
+            let entry  = s:safesubstitute(entry, '__FileExtension__', file_extension , '')
+          endif
+            call add(lines, bullet . entry)
+        endfor
+      endif
+    endfor
+    
+    return lines
+  endfunction
+  return a:state
+endfunction
+
+function! s:default_generatorTags(state)
+  function a:state.f() abort
     let need_all_tags = empty(self.specific_tags)
     let metadata = s:load_tags_metadata()
 
@@ -393,6 +512,22 @@ function! vimwiki#tags#generate_tags(create, ...) abort
 
     return lines
   endfunction
+  return a:state
+endfunction
+
+function! vimwiki#tags#generate_tags(create, ...) abort
+  " Generate tags in current buffer
+  " Similar to vimwiki#base#generate_links.  In the current buffer, appends
+  " tags and references to all their instances.  If no arguments (tags) are
+  " specified, outputs all tags.
+  let specific_tags = a:000
+  let header_level = vimwiki#vars#get_global('tags_header_level')
+
+  " use a dictionary function for closure like capability
+  " copy all local variables into dict (add a: if arguments are needed)
+  " use default generatorTags closure (define new ones...?)
+  "let GeneratorTags = function('s:default_generatorTags')(copy(l:))
+  let GeneratorTags = function('s:zt_generaotrTags')(copy(l:))
 
   let tag_match = printf('rxH%d', header_level + 1)
   let links_rx = '^\%('.vimwiki#vars#get_syntaxlocal(tag_match).'\)\|'.
